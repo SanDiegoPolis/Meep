@@ -18,6 +18,8 @@ npm run demo
 
 ## 正式部署
 
+Linux 服务器可以通过 GitHub Actions 自动测试并发布。首次配置见 [CI/CD 部署指南](deploy/README.md)。
+
 ### 配置 QQ 登录
 
 1. 在 QQ 互联创建网站应用，开通 `get_user_info` 接口。登记完整的 HTTPS 回调地址，例如 `https://map.example.com/auth/qq/callback`。 [QQ 互联管理中心](https://connect.qq.com/manage.html#/) · [回调地址说明](https://wiki.connect.qq.com/回调地址常见问题及修改方法/)

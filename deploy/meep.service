@@ -1,0 +1,17 @@
+[Unit]
+Description=Meep community map
+After=network.target
+
+[Service]
+Type=exec
+User=meep
+Group=meep
+WorkingDirectory=/srv/meep/current
+ExecStart=/usr/bin/env node --env-file=/srv/meep/shared/.env server/main.js
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
