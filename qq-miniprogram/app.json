@@ -1,0 +1,9 @@
+{
+  "pages": ["pages/map/index"],
+  "window": {
+    "navigationBarTitleText": "面基地图",
+    "navigationBarBackgroundColor": "#f7f8f3",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f7f8f3"
+  }
+}

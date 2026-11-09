@@ -1,0 +1,24 @@
+page { background: #f7f8f3; color: #1b2c27; font-size: 29rpx; }
+.page { padding: 26rpx 24rpx; }
+.eyebrow { color: #285e49; font-size: 22rpx; font-weight: bold; letter-spacing: 2rpx; }
+.title { font-size: 59rpx; font-weight: bold; margin: 4rpx 0 8rpx; }
+.hint { color: #53655e; font-size: 25rpx; }
+.map { position: relative; height: 310rpx; margin-top: 20rpx; border-radius: 19rpx; background: #142b31; overflow: hidden; }
+.world { position: absolute; width: 100%; height: 100%; }
+.pin { position: absolute; display: flex; align-items: center; padding: 5rpx 11rpx 5rpx 5rpx; gap: 6rpx; transform: translate(-50%, -50%); color: #21382d; background: #f5fbf1; border-radius: 25rpx; font-size: 21rpx; font-weight: bold; white-space: nowrap; }
+.initial { display: flex; flex: none; width: 36rpx; height: 36rpx; align-items: center; justify-content: center; background: #d8ead9; color: #244239; border-radius: 50%; font-size: 22rpx; font-weight: bold; }
+.pin-count { color: #285e49; font-size: 18rpx; }
+.panel { margin-top: 16rpx; padding: 18rpx 21rpx; background: white; border: 1rpx solid #dce3db; border-radius: 17rpx; }
+.panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 12rpx; margin-bottom: 7rpx; }
+.heading { font-size: 33rpx; font-weight: bold; }
+.row { display: flex; align-items: center; gap: 12rpx; padding: 12rpx 0; border-bottom: 1rpx solid #e8ede6; }
+.row:last-child { border-bottom: 0; }
+.city { color: #53655e; margin-left: auto; font-size: 24rpx; }
+.link { color: #285e49; font-size: 24rpx; padding: 6rpx; }
+.status { display: inline-flex; align-items: center; gap: 7rpx; margin: 10rpx 0; padding: 5rpx 13rpx; border-radius: 20rpx; font-size: 22rpx; }
+.status.available { background: #e9f4e6; color: #225739; }
+.status.busy { background: #fcebe8; color: #8e3836; }
+.dot { display: inline-block; width: 12rpx; height: 12rpx; background: currentColor; border-radius: 50%; }
+.fact { display: flex; align-items: baseline; gap: 12rpx; padding: 7rpx 0; font-size: 25rpx; }
+.fact-label { color: #53655e; flex: none; }
+.login { color: white; background: #285e49; font-size: 28rpx; margin-bottom: 9rpx; }

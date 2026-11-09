@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="在世界地图上看看同好们此刻在哪座城市。">
+  <title>面基地图 · 世界地图</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#map" aria-label="面基地图首页">
+        <img src="/favicon.svg" width="36" height="36" alt="">
+        <span>面基地图<small>MIANJI ATLAS</small></span>
+      </a>
+      <nav class="nav" aria-label="主导航">
+        <a href="#map" data-view="map">世界地图</a>
+        <a href="#profile" data-view="profile" hidden>个人资料</a>
+        <a href="#admin" data-view="admin" hidden>管理面板</a>
+      </nav>
+      <div id="account" class="account"></div>
+    </div>
+  </header>
+  <main id="main" class="wrap" tabindex="-1">
+    <p class="loading" role="status">正在加载面基地图…</p>
+  </main>
+  <footer class="wrap footer">
+    <span>面基地图 · MIANJI ATLAS</span>
+    <span>底图 <a href="https://www.naturalearthdata.com/">Natural Earth</a> · 城市 <a href="https://www.geonames.org/">GeoNames</a></span>
+  </footer>
+  <aside id="member-card" class="member-card" aria-label="成员资料" hidden></aside>
+  <dialog id="location-dialog" class="location-dialog" aria-labelledby="dialog-title"></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
