@@ -1,4 +1,4 @@
-import { BlockList, isIP } from "node:net";
+import { BlockList, SocketAddress, isIP } from "node:net";
 
 const nonPublic = new BlockList();
 for (const [subnet, prefix] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8],
@@ -10,7 +10,7 @@ for (const [subnet, prefix] of [["::", 128], ["::1", 128], ["fc00::", 7], ["fe80
 }
 
 export function createGeoDetector(env, cities, request = fetch) {
-  const trusted = new Set((env.TRUST_PROXY ?? "").split(",").map((entry) => ip(entry.trim())).filter(Boolean));
+  const trusted = new Set((env.TRUST_PROXY ?? "").split(",").map((entry) => proxyAddress(ip(entry.trim()))).filter(Boolean));
   const template = env.GEOIP_URL;
   if (template) {
     const url = new URL(template.replace("{ip}", "203.0.113.1"));
@@ -26,7 +26,7 @@ export function createGeoDetector(env, cities, request = fetch) {
 
   async function detect(req, match) {
     const peer = ip(req.socket.remoteAddress);
-    const proxy = trusted.has(peer);
+    const proxy = trusted.has(proxyAddress(peer));
     if (proxy) {
       const result = match({
         city: header(req, "cf-ipcity"),
@@ -59,6 +59,14 @@ function ip(value) {
   if (typeof value !== "string") return null;
   const address = value.replace(/^::ffff:(?=\d)/i, "");
   return isIP(address) ? address : null;
+}
+
+function proxyAddress(address) {
+  if (!address?.includes(":")) return address;
+  const [host, scope] = address.split("%");
+  const canonical = new SocketAddress({ address: host, family: "ipv6" }).address;
+  // SocketAddress formats the address without its scope ID.
+  return scope ? `${canonical}%${scope}` : ip(canonical);
 }
 
 function string(value) {
