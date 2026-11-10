@@ -416,6 +416,7 @@ function cityPicker(label, initial) {
       clearTimeout(timer);
       pending?.abort();
       options.hidden = true;
+      options.replaceChildren();
       const query = search.value.trim();
       if (query) timer = setTimeout(() => searchCities(query), 180);
     });
