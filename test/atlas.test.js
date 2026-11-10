@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { request as httpRequest } from "node:http";
 import test from "node:test";
+import { specificDateRange } from "../public/forms.js";
 import { countryCamera, moveCamera, screenPoint } from "../public/map-view.js";
 import { createApp } from "../server/app.js";
 import { loadCities } from "../server/cities.js";
@@ -72,6 +73,16 @@ test("trip, specific dates, annual ranges and login cities have deterministic pr
   assert.equal(scheduledCity(profile, "2027-01-11"), null);
   assert.equal(mapCity({ profile, last_login_city: hangzhou }, "2027-01-11", 0), hangzhou);
   assert.equal(mapCity({ profile }, "2026-12-25", 0, (id) => id === hangzhou), hangzhou);
+});
+
+test("annual schedule conversion preserves cross-year and leap-day boundaries", () => {
+  assert.deepEqual(specificDateRange("12-20", "01-10", "2026-11-10"), ["2026-12-20", "2027-01-10"]);
+  assert.deepEqual(specificDateRange("12-20", "01-10", "2027-01-10"), ["2026-12-20", "2027-01-10"]);
+  assert.deepEqual(specificDateRange("12-20", "01-10", "2027-01-11"), ["2027-12-20", "2028-01-10"]);
+  assert.deepEqual(specificDateRange("02-29", "03-10", "2026-11-10"), ["2028-02-29", "2028-03-10"]);
+  assert.deepEqual(specificDateRange("12-20", "02-29", "2099-11-10"), ["2103-12-20", "2104-02-29"]);
+  assert.deepEqual(specificDateRange("01-01", "12-31", "2026-11-10"), ["2026-01-01", "2026-12-31"]);
+  assert.deepEqual(specificDateRange("2025-12-20", "2026-01-10", "2026-11-10"), ["2025-12-20", "2026-01-10"]);
 });
 
 test("OAuth sessions, per-field visibility, and temporary city changes work through the API", async (t) => {
