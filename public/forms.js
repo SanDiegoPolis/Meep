@@ -311,6 +311,26 @@ function select(options, value) {
   return control;
 }
 
+export function specificDateRange(from, to, day) {
+  const monthDay = /^[0-9]{2}-[0-9]{2}$/;
+  const fromAnnual = monthDay.test(from);
+  const toAnnual = monthDay.test(to);
+  const crossesYear = fromAnnual && toAnnual && from > to;
+  const endOffset = crossesYear ? 1 : 0;
+  let year = Number(day.slice(0, 4));
+  if (crossesYear && day.slice(5) <= to) year--;
+
+  const leapDayOffset = from === "02-29" ? 0 : to === "02-29" ? endOffset : null;
+  if (leapDayOffset !== null) {
+    let leapYear = Math.ceil((year + leapDayOffset) / 4) * 4;
+    if (leapYear % 100 === 0 && leapYear % 400 !== 0) leapYear += 4;
+    year = leapYear - leapDayOffset;
+  }
+
+  const withYear = (value, year) => String(year).padStart(4, "0") + "-" + value;
+  return [fromAnnual ? withYear(from, year) : from, toAnnual ? withYear(to, year + endOffset) : to];
+}
+
 function scheduleRow(initial, day, remove) {
   const node = el("section", "schedule");
   const top = el("div", "panel-heading");
@@ -348,6 +368,7 @@ function scheduleRow(initial, day, remove) {
     if (trip) recurrence.value = "date";
     const annual = recurrence.value === "annual";
     note.hidden = !annual;
+    if (!annual) [from, to] = specificDateRange(from, to, day);
     for (const [control, value] of [[start, from], [end, to]]) {
       control.type = annual ? "text" : "date";
       control.placeholder = annual ? "MM-DD" : "";
@@ -358,7 +379,7 @@ function scheduleRow(initial, day, remove) {
       } else {
         control.removeAttribute("pattern");
         control.removeAttribute("maxlength");
-        control.value = value.length === 5 ? day.slice(0, 5) + value : value;
+        control.value = value;
       }
     }
   }
