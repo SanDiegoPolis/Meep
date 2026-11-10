@@ -10,7 +10,7 @@ export const nonce = () => randomBytes(32).toString("base64url");
 export const digest = (value) => createHash("sha256").update(value).digest("hex");
 export const validNonce = (value) => typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value);
 
-export function openStore(file) {
+export function openStore(file, cityAvailable = Number.isSafeInteger) {
   const db = new DatabaseSync(file);
   db.exec(`
     PRAGMA busy_timeout = 5000;
@@ -106,7 +106,8 @@ export function openStore(file) {
   function prompt(context, day, now) {
     const { account: user, session } = context;
     if (session.token_hash !== user.last_login_session || session.prompt_until <= now) return null;
-    if (scheduledCity(user.profile, day) !== session.expected_city) return null;
+    if (!cityAvailable(session.observed_city)
+      || scheduledCity(user.profile, day, cityAvailable) !== session.expected_city) return null;
     return { observed: session.observed_city, expected: session.expected_city };
   }
 
@@ -115,7 +116,8 @@ export function openStore(file) {
     VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider, subject) DO NOTHING
   `);
 
-  function signIn(identity, observedCity, now, day, previousToken) {
+  function signIn(identity, observation, now, day, previousToken) {
+    const observedCity = cityAvailable(observation) ? observation : null;
     const token = nonce();
     const tokenHash = digest(token);
     transaction(() => {
@@ -123,7 +125,7 @@ export function openStore(file) {
         JSON.stringify(initialProfile(identity.nickname)), null);
       const user = account(db.prepare("SELECT * FROM accounts WHERE provider = ? AND subject = ?")
         .get(identity.provider, identity.subject));
-      const expected = scheduledCity(user.profile, day);
+      const expected = scheduledCity(user.profile, day, cityAvailable);
       const needsPrompt = observedCity && expected && observedCity !== expected
         && activeOverride(user, now)?.city !== observedCity;
       db.prepare(`
@@ -183,7 +185,7 @@ export function openStore(file) {
         db.prepare(`
           UPDATE sessions SET observed_city = NULL, expected_city = NULL, prompt_until = NULL
           WHERE user_id = ? AND expected_city IS NOT ?
-        `).run(id, scheduledCity(profile, day));
+        `).run(id, scheduledCity(profile, day, cityAvailable));
         return account(accountById.get(id));
       });
     },
