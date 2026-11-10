@@ -163,7 +163,6 @@ export function renderProfile(main, data, session, onSaved) {
       avatarError.textContent = "";
       showAvatar(saved.avatar);
       updateCurrent(saved);
-      notify("资料已保存");
       onSaved(saved);
     } catch (error) {
       errorLine.textContent = error.message;
