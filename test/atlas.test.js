@@ -148,10 +148,10 @@ test("OAuth sessions, per-field visibility, and temporary city changes work thro
   });
   const base = "http://127.0.0.1:" + server.address().port;
 
-  const api = async (path, cookie, method = "GET", payload, origin = site) => {
+  const api = async (path, cookie, method = "GET", payload, origin = site, contentType = "application/json") => {
     const headers = { Origin: origin };
     if (cookie) headers.Cookie = cookie;
-    if (payload !== undefined) headers["Content-Type"] = "application/json";
+    if (payload !== undefined) headers["Content-Type"] = contentType;
     const response = await fetch(base + "/api/" + path, { method, headers, body: JSON.stringify(payload) });
     return { status: response.status, value: await response.json() };
   };
@@ -199,8 +199,11 @@ test("OAuth sessions, per-field visibility, and temporary city changes work thro
 
   const profile = Object.fromEntries(fields.map(({ key }) => [key, "示例-" + key]));
   Object.assign(profile, { status: "busy", home: beijing, residence: nanjing, rules: [] });
-  assert.equal((await api("profile", member, "PUT", profile, "https://other.example")).status, 403);
-  assert.equal((await api("profile", member, "PUT", profile)).status, 200);
+  const jsonWithParameters = "Application/JSON ; Charset=UTF-8";
+  assert.equal((await api("profile", member, "PUT", profile, "https://other.example", jsonWithParameters)).status, 403);
+  assert.equal((await api("profile", member, "PUT", profile, site, "text/plain")).status, 415);
+  assert.equal((await api("profile", member, "PUT", profile, site, "application/jsonp")).status, 415);
+  assert.equal((await api("profile", member, "PUT", profile, site, jsonWithParameters)).status, 200);
   const initial = await getPin();
   assert.equal(initial.city.id, shanghai);
   assert.equal(initial.status, "busy");

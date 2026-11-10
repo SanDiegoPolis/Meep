@@ -258,7 +258,8 @@ function cookieValue(req, key) {
 }
 
 async function body(req, limit = 48 * 1024) {
-  if (req.headers["content-type"]?.split(";")[0] !== "application/json") {
+  const mediaType = req.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase();
+  if (mediaType !== "application/json") {
     throw new HttpError(415, "请求需要 JSON 数据。");
   }
   if (Number(req.headers["content-length"]) > limit) throw new HttpError(413, "提交内容过长。");
