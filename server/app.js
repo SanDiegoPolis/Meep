@@ -70,7 +70,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
       const admin = account && (admins.has(accountKey(account)) || (demo && account.subject === "admin"));
       if (method === "GET" && path === "/api/session") {
         const ipCountry = await geo.country(req);
-        const ownCity = account && cities.get(mapCity(account, day, now));
+        const ownCity = account && displayedCity(account, day, now);
         const mapCountry = cities.countryView(ipCountry) ?? cities.countryView(ownCity?.cc)
           ?? cities.countryView(cities.countryAtTimeZone(url.searchParams.get("zone")));
         const pending = context && store.prompt(context, day, now);
@@ -104,7 +104,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
         const owner = store.uploadedAvatar(avatar[1], avatar[2]);
         if (!owner || (account.id !== owner.id && (
           owner.profile.status === "hidden" || !personalVisibility(owner.profile).avatar
-          || !cities.get(mapCity(owner, day, now))
+          || !displayedCity(owner, day, now)
         ))) throw new HttpError(404, "头像不存在。");
         res.writeHead(200, { "Content-Type": "image/jpeg", "Cross-Origin-Resource-Policy": "same-origin" });
         return res.end(owner.image);
@@ -112,7 +112,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
       if (method === "GET" && path === "/api/map") {
         const settings = store.settings();
         const members = store.visibleAccounts().flatMap((user) => {
-          const city = cities.get(mapCity(user, day, now));
+          const city = displayedCity(user, day, now);
           if (!city) return [];
           return [{
             id: user.id, city,
@@ -166,8 +166,12 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
     }
   });
 
+  function displayedCity(account, day, now) {
+    return cities.get(mapCity(account, day, now, cities.get));
+  }
+
   function ownProfile(account, day, now) {
-    const override = activeOverride(account, now);
+    const override = activeOverride(account, now, cities.get);
     return {
       profile: {
         ...account.profile,
@@ -179,7 +183,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
       },
       accountKey: accountKey(account),
       avatar: account.display_avatar,
-      current: cities.get(mapCity(account, day, now)),
+      current: displayedCity(account, day, now),
       override: override ? { city: cities.get(override.city), expiresAt: override.expiresAt } : null,
       settings: store.settings(),
     };

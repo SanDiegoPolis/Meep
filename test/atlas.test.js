@@ -71,12 +71,16 @@ test("trip, specific dates, annual ranges and login cities have deterministic pr
   assert.equal(scheduledCity(profile, "2027-01-10"), beijing);
   assert.equal(scheduledCity(profile, "2027-01-11"), null);
   assert.equal(mapCity({ profile, last_login_city: hangzhou }, "2027-01-11", 0), hangzhou);
+  assert.equal(mapCity({ profile }, "2026-12-25", 0, (id) => id === hangzhou), hangzhou);
 });
 
 test("OAuth sessions, per-field visibility, and temporary city changes work through the API", async (t) => {
   const site = "https://atlas.example";
-  const store = openStore(":memory:");
+  const unavailableCities = new Set();
+  const catalog = { ...cities, get: (id) => unavailableCities.has(id) ? null : cities.get(id) };
+  const store = openStore(":memory:", catalog.get);
   let now = Date.parse("2026-11-07T02:00:00Z");
+  let detectedCity = shanghai;
   let ipCountry = null;
   let challenge;
   let qqSubject = "mock-admin";
@@ -108,7 +112,7 @@ test("OAuth sessions, per-field visibility, and temporary city changes work thro
     }
   });
   const server = createApp({
-    store, cities, providers, geo: { city: async () => shanghai, country: async () => ipCountry },
+    store, cities: catalog, providers, geo: { city: async () => detectedCity, country: async () => ipCountry },
     origin: site, timeZone: "Asia/Shanghai",
     admins: new Set(["qq:mock-admin"]), clock: () => now,
   });
@@ -276,8 +280,34 @@ test("OAuth sessions, per-field visibility, and temporary city changes work thro
   await api("admin", admin, "PUT", settings);
   now += 3 * day - 1;
   assert.equal((await getPin()).city.id, shanghai);
+  unavailableCities.add(shanghai);
+  assert.equal((await getPin())?.city.id, nanjing);
+  assert.equal((await api("profile", member)).value.override, null);
+  unavailableCities.clear();
   now += 1;
   assert.equal((await getPin()).city.id, nanjing);
+
+  profile.rules.push({ kind: "trip", annual: false, start: "2026-11-10", end: "2026-11-10", city: hangzhou });
+  assert.equal((await api("profile", member, "PUT", profile)).status, 200);
+  assert.equal((await getPin()).city.id, hangzhou);
+  unavailableCities.add(hangzhou);
+  assert.equal((await getPin())?.city.id, nanjing);
+  member = await login("mua");
+  assert.equal((await api("session", member)).value.prompt?.expected?.id, nanjing);
+  unavailableCities.add(shanghai);
+  assert.equal((await api("session", member)).value.prompt, null);
+  assert.equal((await api("prompt", member, "POST", { accepted: true })).status, 409);
+  unavailableCities.delete(shanghai);
+  unavailableCities.add(nanjing);
+  assert.equal((await getPin())?.city.id, shanghai);
+  detectedCity = hangzhou;
+  member = await login("mua");
+  assert.equal((await getPin())?.city.id, shanghai);
+  unavailableCities.add(shanghai);
+  assert.equal((await getPin())?.city.id, beijing);
+  unavailableCities.clear();
+  assert.equal((await getPin()).city.id, hangzhou);
+  assert.deepEqual((await api("admin", admin)).value, settings);
 
   settings.visibility.nickname = true;
   assert.equal((await api("admin", admin, "PUT", settings)).status, 200);

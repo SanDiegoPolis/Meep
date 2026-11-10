@@ -22,26 +22,29 @@ function matches(rule, day) {
   return rule.start <= monthDay || monthDay <= rule.end;
 }
 
-export function scheduledCity(profile, day) {
-  const applicable = profile.rules.filter((rule) => matches(rule, day));
-  const rule = applicable.findLast((item) => item.kind === "trip")
-    ?? applicable.findLast((item) => !item.annual)
-    ?? applicable.at(-1);
-  if (!rule) return null;
+function ruleCity(profile, rule) {
   return rule.kind === "trip" ? rule.city : profile[rule.kind];
 }
 
-export function activeOverride(account, now) {
-  if (account.override_until > now) {
+export function scheduledCity(profile, day, isAvailable = Number.isSafeInteger) {
+  const applicable = profile.rules.filter((rule) => matches(rule, day) && isAvailable(ruleCity(profile, rule)));
+  const rule = applicable.findLast((item) => item.kind === "trip")
+    ?? applicable.findLast((item) => !item.annual)
+    ?? applicable.at(-1);
+  return rule ? ruleCity(profile, rule) : null;
+}
+
+export function activeOverride(account, now, isAvailable = Number.isSafeInteger) {
+  if (account.override_until > now && isAvailable(account.override_city)) {
     return { city: account.override_city, expiresAt: account.override_until };
   }
   return null;
 }
 
-export function mapCity(account, day, now) {
-  return activeOverride(account, now)?.city
-    ?? scheduledCity(account.profile, day)
-    ?? account.last_login_city
-    ?? account.profile.residence
-    ?? account.profile.home;
+export function mapCity(account, day, now, isAvailable = Number.isSafeInteger) {
+  const { profile } = account;
+  return activeOverride(account, now, isAvailable)?.city
+    ?? scheduledCity(profile, day, isAvailable)
+    ?? [account.last_login_city, profile.residence, profile.home].find(isAvailable)
+    ?? null;
 }

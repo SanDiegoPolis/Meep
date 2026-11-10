@@ -22,7 +22,7 @@ if ((url.protocol !== "https:" && !(local && url.protocol === "http:"))
 const cities = loadCities();
 const file = demo ? ":memory:" : resolve(process.env.DATABASE_PATH || "data/mianji.sqlite");
 if (!demo) mkdirSync(dirname(file), { recursive: true });
-const store = openStore(file);
+const store = openStore(file, cities.get);
 if (demo) seedDemo(store);
 const server = createApp({
   store, cities, demo, origin: url.origin,
