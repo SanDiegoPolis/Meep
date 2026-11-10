@@ -11,6 +11,10 @@ function cityKey(value) {
   return key(value).replace(/市$/, "");
 }
 
+function canonicalTimeZone(zone) {
+  return new Intl.DateTimeFormat("en", { timeZone: zone }).resolvedOptions().timeZone;
+}
+
 export function loadCities() {
   const rows = JSON.parse(gunzipSync(readFileSync(new URL("./data/cities.json.gz", import.meta.url))));
   const index = rows.map(([id, name, local, cc, region, codes, lat, lon, population, aliases]) => {
@@ -32,7 +36,7 @@ export function loadCities() {
   const zoneAliases = new Map();
   for (const [zone, country] of Object.entries(timeZones)) {
     try {
-      const alias = new Intl.DateTimeFormat("en", { timeZone: zone }).resolvedOptions().timeZone;
+      const alias = canonicalTimeZone(zone);
       zoneAliases.set(alias, !zoneAliases.has(alias) || zoneAliases.get(alias) === country ? country : null);
     } catch {
       // Keep the catalog name if this runtime's time zone data does not know it yet.
@@ -42,7 +46,15 @@ export function loadCities() {
   return {
     get: (id) => byId.get(id) ?? null,
     countryAtTimeZone(zone) {
-      return (Object.hasOwn(timeZones, zone) ? timeZones[zone] : zoneAliases.get(zone)) ?? null;
+      if (typeof zone !== "string" || !/^[A-Za-z0-9_+./-]{1,255}$/.test(zone)) return null;
+      if (Object.hasOwn(timeZones, zone)) return timeZones[zone];
+      if (zoneAliases.has(zone)) return zoneAliases.get(zone);
+      try {
+        return zoneAliases.get(canonicalTimeZone(zone)) ?? null;
+      } catch (error) {
+        if (error instanceof RangeError) return null;
+        throw error;
+      }
     },
     countryView(code) {
       const entries = byCountry.get(code);
