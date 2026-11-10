@@ -151,7 +151,11 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
       }
       if (path === "/api/admin" && ["GET", "PUT"].includes(method)) {
         if (!admin) throw new HttpError(403, "需要管理员权限。");
-        if (method === "PUT") store.saveSettings(validateSettings(await body(req)));
+        if (method === "PUT") {
+          const payload = await body(req);
+          if (!store.getSession(token, clock())) throw new HttpError(401, "请先登录。");
+          store.saveSettings(validateSettings(payload));
+        }
         return json(res, store.settings());
       }
       throw new HttpError(404, "请求的功能不存在。");
