@@ -3,6 +3,11 @@ set -euo pipefail
 umask 077
 
 root=${1:?Pass the absolute Meep deployment directory}
+port=${2:-4173}
+if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
+  echo "Pass a valid Meep service port." >&2
+  exit 1
+fi
 if [[ "$root" != /* || ! -d "$root/releases" || ! -r "$root/shared/.env" ]]; then
   echo "Meep deployment directory is not initialized." >&2
   exit 1
@@ -58,7 +63,7 @@ point_current_at "$release"
 sudo -n /usr/bin/systemctl restart "$service"
 for attempt in {1..15}; do
   if /usr/bin/systemctl is-active --quiet "$service" &&
-    curl --fail --silent --max-time 2 --output /dev/null http://127.0.0.1:4173/api/session; then
+    curl --fail --silent --max-time 2 --output /dev/null "http://127.0.0.1:$port/api/session"; then
     trap - EXIT HUP INT TERM
     echo "Meep is ready."
     exit 0

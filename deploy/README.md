@@ -54,6 +54,8 @@ DATABASE_PATH=/srv/meep/shared/data/mianji.sqlite
    restrict,command="/usr/local/bin/meep-deploy /srv/meep" ssh-ed25519 <公钥内容> meep-ci
    ```
 
+   如果修改了服务的 `PORT`，请把同一端口填到反向代理，并加到强制命令的部署目录之后，例如 `/usr/local/bin/meep-deploy /srv/meep 28081`。
+
 3. 从能连接服务器的终端运行 ssh-keyscan -t ed25519 -p <SSH端口> <SSH地址>，保存输出。使用 ssh-keygen -lf <保存的文件> 查看指纹，对照服务器上 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub 的输出。指纹一致后，使用整行主机公钥配置 DEPLOY_KNOWN_HOSTS。
 4. 在 GitHub 仓库 Settings → Environments 创建 production，并添加以下变量和密钥。 [GitHub Environments 说明](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
 
