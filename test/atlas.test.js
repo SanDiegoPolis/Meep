@@ -149,7 +149,9 @@ test("OAuth sessions, per-field visibility, and temporary city changes work thro
 
   assert.equal((await api("map")).status, 401);
   assert.equal((await api("session?zone=Europe%2FParis")).value.mapCountry.code, "FR");
+  assert.equal((await api("session?zone=US%2FPacific")).value.mapCountry?.code, "US");
   assert.equal((await api("session?zone=UTC")).value.mapCountry, null);
+  assert.equal((await api("session?zone=not-a-time-zone")).value.mapCountry, null);
   const admin = await login("qq", true);
   let member = await login("mua");
   assert.equal((await api("profile", member)).value.accountKey, "mua:MUA:42");
