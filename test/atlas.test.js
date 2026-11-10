@@ -38,6 +38,19 @@ test("location headers are accepted only from a configured proxy and do not requ
   assert.equal(await geo.country({ ...trusted, headers: { "cf-ipcountry": "JP" } }), "JP");
 });
 
+test("trusted proxies match equivalent IP literals without ignoring IPv6 scopes", async () => {
+  const geo = createGeoDetector({
+    TRUST_PROXY: "2001:0DB8:0:0:0:0:0:000A, ::ffff:c000:201, FE80:0:0:0:0:0:0:1%4, invalid",
+  }, cities);
+  const headers = { "cf-ipcity": "Shanghai", "cf-ipcountry": "CN", "cf-region-code": "SH" };
+  for (const remoteAddress of ["2001:db8::a", "192.0.2.1", "::ffff:192.0.2.1", "fe80::1%4"]) {
+    assert.equal(await geo.city({ socket: { remoteAddress }, headers }), shanghai, remoteAddress);
+  }
+  for (const remoteAddress of ["2001:db8::b", "192.0.2.2", "fe80::1%5", "fe80::1", "invalid"]) {
+    assert.equal(await geo.country({ socket: { remoteAddress }, headers }), null, remoteAddress);
+  }
+});
+
 test("zoom keeps its anchor and a country's view can span the date line", () => {
   const camera = countryCamera(cities.countryView("CN"));
   const city = cities.get(shanghai);
