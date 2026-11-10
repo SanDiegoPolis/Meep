@@ -32,8 +32,9 @@ async function renderPage() {
   map?.dispose();
   map = null;
   const requested = location.hash.slice(1);
-  const view = session.viewer && requested === "profile" ? "profile"
-    : session.viewer?.admin && requested === "admin" ? "admin" : "map";
+  const viewer = session.viewer;
+  const view = viewer && requested === "profile" ? "profile"
+    : viewer?.admin && requested === "admin" ? "admin" : "map";
   renderHeader(view);
   window.scrollTo(0, 0);
   document.title = "面基地图 · " + ({ map: "世界地图", profile: "个人资料", admin: "管理面板" })[view];
@@ -46,10 +47,12 @@ async function renderPage() {
     const data = await api("/api/" + view);
     if (id !== renderId) return;
     if (view === "profile") renderProfile(main, data, session, (saved) => {
-      session.viewer.nickname = saved.profile.nickname;
-      session.viewer.avatar = saved.avatar;
-      session.viewer.status = saved.profile.status;
+      if (viewer !== session.viewer) return;
+      viewer.nickname = saved.profile.nickname;
+      viewer.avatar = saved.avatar;
+      viewer.status = saved.profile.status;
       if (id === renderId) renderHeader("profile");
+      notify("资料已保存");
     });
     else renderAdmin(main, data, session.fields);
   } catch (error) {
