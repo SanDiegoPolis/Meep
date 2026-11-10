@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
+import { request as httpRequest } from "node:http";
 import test from "node:test";
 import { countryCamera, moveCamera, screenPoint } from "../public/map-view.js";
 import { createApp } from "../server/app.js";
@@ -283,4 +284,26 @@ test("OAuth sessions, per-field visibility, and temporary city changes work thro
   assert.equal((await api("profile", member, "PUT", profile)).status, 200);
   assert.equal((await api("profile", member)).value.profile.nickname, "");
   assert.equal(await getPin(), undefined);
+
+  const update = JSON.stringify({ ...settings, overrideDays: 7 });
+  const started = once(server, "request");
+  const pending = httpRequest(base + "/api/admin", {
+    method: "PUT", headers: {
+      Origin: site, Cookie: admin, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(update),
+    },
+  });
+  const finished = once(pending, "response");
+  try {
+    pending.write(update.slice(0, 1));
+    await started;
+    assert.equal((await api("logout", admin, "POST")).status, 200);
+    pending.end(update.slice(1));
+    const [response] = await finished;
+    response.resume();
+    assert.equal(response.statusCode, 401);
+    assert.deepEqual(store.settings(), settings);
+  } finally {
+    pending.destroy();
+    await finished.catch(() => {});
+  }
 });
