@@ -3,14 +3,13 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { request as httpRequest } from "node:http";
 import test from "node:test";
-import { specificDateRange } from "../public/forms.js";
 import { countryCamera, moveCamera, screenPoint } from "../public/map-view.js";
 import { createApp } from "../server/app.js";
 import { loadCities } from "../server/cities.js";
 import { createGeoDetector } from "../server/geoip.js";
 import { calendar, isDay, mapCity, scheduledCity } from "../server/location.js";
 import { createProviders } from "../server/oauth.js";
-import { fields } from "../server/profile.js";
+import { defaultSettings, fields, initialProfile, validateProfile } from "../server/profile.js";
 import { openStore } from "../server/store.js";
 
 const cities = loadCities();
@@ -88,14 +87,30 @@ test("trip, specific dates, annual ranges and login cities have deterministic pr
   assert.equal(mapCity({ profile }, "2026-12-25", 0, (id) => id === hangzhou), hangzhou);
 });
 
-test("annual schedule conversion preserves cross-year and leap-day boundaries", () => {
-  assert.deepEqual(specificDateRange("12-20", "01-10", "2026-11-10"), ["2026-12-20", "2027-01-10"]);
-  assert.deepEqual(specificDateRange("12-20", "01-10", "2027-01-10"), ["2026-12-20", "2027-01-10"]);
-  assert.deepEqual(specificDateRange("12-20", "01-10", "2027-01-11"), ["2027-12-20", "2028-01-10"]);
-  assert.deepEqual(specificDateRange("02-29", "03-10", "2026-11-10"), ["2028-02-29", "2028-03-10"]);
-  assert.deepEqual(specificDateRange("12-20", "02-29", "2099-11-10"), ["2103-12-20", "2104-02-29"]);
-  assert.deepEqual(specificDateRange("01-01", "12-31", "2026-11-10"), ["2026-01-01", "2026-12-31"]);
-  assert.deepEqual(specificDateRange("2025-12-20", "2026-01-10", "2026-11-10"), ["2025-12-20", "2026-01-10"]);
+test("Home and residence each accept one annual schedule without losing legacy schedules", () => {
+  const base = { ...initialProfile(), home: beijing, residence: shanghai };
+  const annual = { annual: true, start: "01-01", end: "03-01" };
+  const once = { annual: false, start: "2026-12-24", end: "2026-12-26" };
+  const home = { ...annual, kind: "home" };
+  const residence = { kind: "residence", annual: true, start: "12-20", end: "01-10" };
+  const trips = [nanjing, hangzhou].map(city => ({ ...once, kind: "trip", city }));
+  const validate = (rules, previous = base) => validateProfile({ ...base, rules }, cities, previous, defaultSettings);
+
+  assert.deepEqual(validate([home, residence, ...trips]).rules, [home, residence, ...trips]);
+  assert.throws(() => validate([home, residence, { ...trips[0], city: null }]),
+    /请为「临时外出时段 1」选择外出城市/);
+  assert.throws(() => validate([home, trips[0], residence, { ...trips[1], end: "invalid" }]),
+    /请为「临时外出时段 2」填写有效的起止日期/);
+  assert.throws(() => validate([home, { ...home, end: "04-01" }]), /老家最多设置一个时段/);
+  assert.throws(() => validate([residence, { ...residence, end: "01-19" }]), /常驻地最多设置一个时段/);
+  const legacyOnce = { ...once, kind: "residence" };
+  assert.throws(() => validate([legacyOnce]), /常驻地的时段每年重复/);
+  assert.throws(() => validate([{ ...once, kind: "home" }]), /老家的时段每年重复/);
+  const legacy = { ...base, rules: [home, { ...home, end: "04-01" }, legacyOnce] };
+  assert.deepEqual(validate(legacy.rules, legacy).rules, legacy.rules);
+  assert.throws(() => validate([home, { ...home, end: "05-01" }], legacy), /老家最多设置一个时段/);
+  assert.deepEqual(validate([legacy.rules[1]], legacy).rules, [legacy.rules[1]]);
+  assert.deepEqual(validate([legacyOnce], legacy).rules, [legacyOnce]);
 });
 
 test("OAuth sessions, per-field visibility, and temporary city changes work through the API", async (t) => {
@@ -177,6 +192,7 @@ test("OAuth sessions, per-field visibility, and temporary city changes work thro
   };
 
   assert.equal((await api("map")).status, 401);
+  assert.equal((await api("cities/detected")).status, 401);
   assert.equal((await api("session?zone=Europe%2FParis")).value.mapCountry.code, "FR");
   assert.equal((await api("session?zone=US%2FPacific")).value.mapCountry?.code, "US");
   assert.equal((await api("session?zone=UTC")).value.mapCountry, null);
@@ -194,6 +210,13 @@ test("OAuth sessions, per-field visibility, and temporary city changes work thro
   assert.equal((await api("admin", member)).status, 403);
   const originalSettings = (await api("admin", admin)).value;
   assert.equal(originalSettings.overrideDays, 2);
+  const legacyVisibility = { ...originalSettings.visibility };
+  delete legacyVisibility.clubName;
+  store.saveSettings({ ...originalSettings, visibility: legacyVisibility });
+  assert.equal((await api("admin", admin)).value.visibility.clubName, true);
+  const suppressedName = { ...originalSettings, visibility: { ...originalSettings.visibility, clubName: false } };
+  assert.equal((await api("admin", admin, "PUT", suppressedName)).value.visibility.clubName, false);
+  assert.equal((await api("admin", admin, "PUT", { ...originalSettings, visibility: legacyVisibility })).value.visibility.clubName, false);
   originalSettings.visibility.qq = true;
   assert.equal((await api("admin", admin, "PUT", originalSettings)).status, 200);
 
@@ -205,9 +228,33 @@ test("OAuth sessions, per-field visibility, and temporary city changes work thro
   assert.equal((await api("profile", member, "PUT", profile, site, "application/jsonp")).status, 415);
   assert.equal((await api("profile", member, "PUT", profile, site, jsonWithParameters)).status, 200);
   const initial = await getPin();
+  assert.equal((await api("cities/detected", member)).value.city.id, shanghai);
+  detectedCity = null;
+  assert.deepEqual((await api("cities/detected", member)).value, { city: null });
+  detectedCity = shanghai;
+  const storedLocation = (await api("profile", member)).value.profile;
+  assert.equal(storedLocation.home.id, beijing);
+  assert.equal(storedLocation.residence.id, nanjing);
   assert.equal(initial.city.id, shanghai);
   assert.equal(initial.status, "busy");
   assert.equal(initial.nickname, profile.nickname);
+  assert.equal(initial.clubName, profile.clubName);
+  assert.equal(initial.clubRole, profile.clubRole);
+  assert.equal(initial.pastRole, undefined);
+  assert.equal((await api("profile", member, "PUT", { ...profile, roleKind: "pastRole", pastRole: "前社长" })).status, 200);
+  const historical = await getPin();
+  assert.equal(historical.clubRole, undefined);
+  assert.equal(historical.pastRole, "前社长");
+  const roleProfile = (await api("profile", member)).value.profile;
+  assert.equal(roleProfile.roleKind, "pastRole");
+  assert.equal(roleProfile.clubRole, profile.clubRole);
+  assert.equal((await api("profile", member, "PUT", { ...profile, roleKind: "invalid" })).status, 400);
+  const hiddenHistory = { ...originalSettings, visibility: { ...originalSettings.visibility, pastRole: false } };
+  assert.equal((await api("admin", admin, "PUT", hiddenHistory)).status, 200);
+  const hiddenRole = await getPin();
+  assert.equal(hiddenRole.clubRole, undefined);
+  assert.equal(hiddenRole.pastRole, undefined);
+  assert.equal((await api("admin", admin, "PUT", originalSettings)).status, 200);
   assert.equal(initial.qq, undefined);
   assert.equal(initial.wechat, undefined);
   assert.equal(initial.rules, undefined);

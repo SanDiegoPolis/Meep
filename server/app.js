@@ -2,16 +2,18 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { avatarBase64Limit, decodeAvatar } from "./avatar.js";
 import { activeOverride, calendar, mapCity } from "./location.js";
-import { fields, HttpError, personalVisibility, publicFields, validateProfile, validateSettings } from "./profile.js";
+import { fields, HttpError, personalVisibility, publicFields, selectedClubRole, validateProfile, validateSettings } from "./profile.js";
 import { nonce, validNonce } from "./store.js";
-import { demoLogins } from "./demo.js";
+import { demoLogins, previewAuthorization } from "./demo.js";
 import { passwordLogin } from "./password.js";
+import { createVerification } from "./verification.js";
 
 const staticFiles = {
   "/": ["index.html", "text/html; charset=utf-8"],
   "/app.js": ["app.js", "text/javascript; charset=utf-8"],
   "/ui.js": ["ui.js", "text/javascript; charset=utf-8"],
   "/map.js": ["map.js", "text/javascript; charset=utf-8"],
+  "/login.js": ["login.js", "text/javascript; charset=utf-8"],
   "/map-view.js": ["map-view.js", "text/javascript; charset=utf-8"],
   "/forms.js": ["forms.js", "text/javascript; charset=utf-8"],
   "/styles.css": ["styles.css", "text/css; charset=utf-8"],
@@ -19,12 +21,22 @@ const staticFiles = {
   "/favicon.svg": ["favicon.svg", "image/svg+xml"],
 };
 
-export function createApp({ store, cities, providers, geo, origin, timeZone, admins, demo = false, clock = Date.now }) {
+export function createApp({
+  store, cities, providers, geo, origin, timeZone, admins, delivery,
+  preview = false, liveTest = false, demo = false, clock = Date.now,
+}) {
   const today = calendar(timeZone);
   const secure = origin.startsWith("https:");
   const checkPassword = passwordLogin(store);
-  const sessionCookie = secure ? "__Host-mianji_session" : "mianji_session";
-  const oauthCookie = secure ? "__Host-mianji_oauth" : "mianji_oauth";
+  const appUrl = new URL(origin);
+  const local = appUrl.protocol === "http:" && appUrl.hostname === "127.0.0.1";
+  const localPreview = local && preview;
+  const localLiveTest = local && liveTest && !localPreview;
+  const verification = createVerification(secure || localLiveTest ? delivery : {}, localPreview, clock);
+  const cookieSuffix = localPreview || localLiveTest ? (localPreview ? "_preview_" : "_live_test_") + (appUrl.port || "80") : "";
+  const cookiePrefix = secure ? "__Host-" : "";
+  const sessionCookie = cookiePrefix + "mianji_session" + cookieSuffix;
+  const oauthCookie = cookiePrefix + "mianji_oauth" + cookieSuffix;
   const assets = new Map(Object.entries(staticFiles).map(([path, [file, type]]) => [
     path, { type, data: readFileSync(new URL("../public/" + file, import.meta.url)) },
   ]));
@@ -52,6 +64,12 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
       const day = today(now);
       const auth = /^\/auth\/(qq|mua)\/(start|callback)$/.exec(path);
       if (method === "GET" && auth) return await oauth(req, res, url, auth[1], auth[2], token, now);
+      const testAuth = /^\/auth\/preview\/(qq|mua)$/.exec(path);
+      if (verification.preview && method === "GET" && testAuth) {
+        const state = url.searchParams.get("state");
+        if (!validNonce(state)) throw new HttpError(400, "演示授权地址无效。");
+        return previewAuthorization(res, testAuth[1], state);
+      }
 
       if (path.startsWith("/api/") && method !== "GET" && req.headers.origin !== origin) {
         throw new HttpError(403, "请从本站页面提交请求。");
@@ -64,6 +82,19 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
         setSession(res, store.signIn({
           provider: "demo", subject: account, nickname: "", avatar: null,
         }, demoLogins[account].city, now, day, token));
+        return json(res, { ok: true });
+      }
+      if (method === "POST" && (path === "/api/login/code/request" || path === "/api/login/code/verify")) {
+        if (secure && req.headers["x-forwarded-proto"] !== "https") {
+          throw new HttpError(403, "请通过 HTTPS 登录。");
+        }
+        const payload = await body(req, 4096);
+        if (path.endsWith("/request")) return json(res, await verification.send(payload));
+
+        const identifier = verification.verify(payload);
+        const city = await geo.city(req);
+        const signedAt = clock();
+        setSession(res, store.signInVerified(identifier, city, signedAt, today(signedAt), token));
         return json(res, { ok: true });
       }
       if (method === "POST" && path === "/api/login/password") {
@@ -91,6 +122,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
         return json(res, {
           demo, providers: { qq: Boolean(providers.qq), mua: Boolean(providers.mua) },
           passwordLoginOrigin: !demo && store.hasPasswordAccounts() ? origin : null,
+          codeLogin: { ...verification.enabled, preview: verification.preview, liveTest: localLiveTest, origin },
           fields, day, timeZone, mapCountry,
           viewer: account ? {
             id: account.id, nickname: account.profile.nickname, avatar: account.display_avatar,
@@ -112,7 +144,26 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
       }
       if (method === "POST" && path === "/api/avatar/qq/start") {
         if (!providers.qq) throw new HttpError(503, "本站还未启用 QQ 授权。");
-        return json(res, { url: startOAuth(req, res, "qq", now, context.session.token_hash) });
+        return json(res, { url: startOAuth(req, res, "qq", now, { avatarSession: context.session.token_hash }) });
+      }
+      const bindingProvider = /^\/api\/bindings\/(qq|mua)\/start$/.exec(path)?.[1];
+      if (method === "POST" && (bindingProvider || path === "/api/bindings/code/request" || path === "/api/bindings/code/verify")) {
+        if (secure && req.headers["x-forwarded-proto"] !== "https") {
+          throw new HttpError(403, "请通过 HTTPS 绑定账号。");
+        }
+        if (bindingProvider) {
+          if (!providers[bindingProvider]) throw new HttpError(503, "本站尚未开通此登录方式。");
+          return json(res, {
+            url: startOAuth(req, res, bindingProvider, now, { bindSession: context.session.token_hash }),
+          });
+        }
+        const payload = await body(req, 4096);
+        const current = store.getSession(token, clock());
+        if (!current) throw new HttpError(401, "请重新登录后再绑定。");
+        const bindSession = current.session.token_hash;
+        if (path.endsWith("/request")) return json(res, await verification.send(payload, bindSession));
+        const identifier = verification.verify(payload, bindSession);
+        return json(res, { bindings: store.bindContact(current.account, payload.channel, identifier) });
       }
       const avatar = /^\/api\/avatars\/([a-f0-9-]{36})\/([a-f0-9-]{36})$/.exec(path);
       if (method === "GET" && avatar) {
@@ -139,6 +190,10 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
       if (method === "GET" && path === "/api/cities") {
         const query = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
         return json(res, { cities: query ? cities.search(query) : [] });
+      }
+      if (method === "GET" && path === "/api/cities/detected") {
+        const detected = demo ? demoLogins[account.subject]?.city : await geo.city(req);
+        return json(res, { city: cities.get(detected) ?? null });
       }
       if (path === "/api/profile") {
         if (method === "GET") return json(res, ownProfile(account, day, now));
@@ -169,7 +224,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
         if (method === "PUT") {
           const payload = await body(req);
           if (!store.getSession(token, clock())) throw new HttpError(401, "请先登录。");
-          store.saveSettings(validateSettings(payload));
+          store.saveSettings(validateSettings(payload, store.settings()));
         }
         return json(res, store.settings());
       }
@@ -190,6 +245,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
     return {
       profile: {
         ...account.profile,
+        roleKind: selectedClubRole(account.profile),
         visibility: personalVisibility(account.profile),
         home: cities.get(account.profile.home),
         residence: cities.get(account.profile.residence),
@@ -197,6 +253,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
           ? { ...rule, city: cities.get(rule.city) } : rule),
       },
       accountKey: accountKey(account),
+      bindings: store.bindings(account),
       avatar: account.display_avatar,
       current: displayedCity(account, day, now),
       override: override ? { city: cities.get(override.city), expiresAt: override.expiresAt } : null,
@@ -212,13 +269,13 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
     res.setHeader("Set-Cookie", cookie(sessionCookie, token, 30 * 24 * 60 * 60));
   }
 
-  function startOAuth(req, res, name, now, avatarSessionHash) {
+  function startOAuth(req, res, name, now, intent) {
     const redirectUri = origin + "/auth/" + name + "/callback";
     const existing = cookieValue(req, oauthCookie);
     const browser = validNonce(existing) ? existing : nonce();
     const state = nonce();
     const { url: target, verifier } = providers[name].start(redirectUri, state);
-    store.rememberOAuth(state, browser, name, verifier, now, avatarSessionHash);
+    store.rememberOAuth(state, browser, name, verifier, now, intent);
     res.setHeader("Set-Cookie", cookie(oauthCookie, browser, 600));
     return target;
   }
@@ -232,18 +289,26 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
     const flow = store.takeOAuth(url.searchParams.get("state"), browser, name, now);
     if (!flow) return redirect(res, "/?login=expired");
     const syncing = Boolean(flow.avatar_session_hash);
-    const result = (status) => redirect(res, syncing ? "/?qqAvatar=" + status + "#profile" : "/?login=" + status);
-    if (syncing && store.getSession(previousToken, now)?.session.token_hash !== flow.avatar_session_hash) {
+    const binding = Boolean(flow.bind_session_hash);
+    const expectedSession = flow.bind_session_hash ?? flow.avatar_session_hash;
+    const result = (status) => redirect(res, binding ? "/?binding=" + status + "#profile"
+      : syncing ? "/?qqAvatar=" + status + "#profile" : "/?login=" + status);
+    if (expectedSession && store.getSession(previousToken, now)?.session.token_hash !== expectedSession) {
       return result("expired");
     }
     const code = url.searchParams.get("code");
     if (!code || code.length > 4096 || url.searchParams.has("error")) return result("denied");
     try {
       const identity = await provider.complete(redirectUri, code, flow.verifier);
-      if (syncing) {
+      if (expectedSession) {
         const current = store.getSession(previousToken, clock());
-        if (current?.session.token_hash !== flow.avatar_session_hash) return result("expired");
-        if (current.account.provider === "qq" && current.account.subject !== identity.subject) return result("mismatch");
+        if (current?.session.token_hash !== expectedSession) return result("expired");
+        if (binding) {
+          store.bindOAuth(current.account, identity);
+          return result("ok");
+        }
+        const linkedQQ = store.oauthSubject(current.account, "qq");
+        if (linkedQQ && linkedQQ !== identity.subject) return result("mismatch");
         if (!identity.qqAvatar) return result("missing");
         store.syncQQAvatar(current.account.id, identity.qqAvatar);
         return result("ok");
@@ -253,6 +318,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
       setSession(res, store.signIn(identity, city, signedAt, today(signedAt), previousToken));
       return redirect(res, "/");
     } catch (error) {
+      if (binding && error instanceof HttpError && error.status === 409) return result("conflict");
       console.warn("OAuth 登录失败", name, error instanceof HttpError ? error.message : error.name);
       return result("failed");
     }

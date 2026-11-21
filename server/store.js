@@ -10,6 +10,8 @@ export const nonce = () => randomBytes(32).toString("base64url");
 export const digest = (value) => createHash("sha256").update(value).digest("hex");
 export const validNonce = (value) => typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value);
 
+const bindingConflict = () => new HttpError(409, "该登录方式已绑定到账号，无法重复绑定。");
+
 export function openStore(file, cityAvailable = Number.isSafeInteger) {
   const db = new DatabaseSync(file);
   db.exec(`
@@ -44,6 +46,17 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
       identifier TEXT PRIMARY KEY NOT NULL,
       user_id TEXT NOT NULL REFERENCES password_credentials(user_id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS verified_identifiers (
+      identifier TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS linked_oauth (
+      provider TEXT NOT NULL CHECK(provider IN ('qq', 'mua')),
+      subject TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      PRIMARY KEY (provider, subject),
+      UNIQUE (user_id, provider)
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -59,7 +72,8 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
       provider TEXT NOT NULL,
       expires_at INTEGER NOT NULL,
       verifier TEXT,
-      avatar_session_hash TEXT
+      avatar_session_hash TEXT,
+      bind_session_hash TEXT
     );
     CREATE TABLE IF NOT EXISTS site_settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -85,9 +99,11 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
   }
 
   transaction(() => {
-    if (!db.prepare("PRAGMA table_info(oauth_states)").all().some(({ name }) => name === "avatar_session_hash")) {
+    const columns = db.prepare("PRAGMA table_info(oauth_states)").all().map(({ name }) => name);
+    if (!columns.includes("avatar_session_hash")) {
       db.exec("ALTER TABLE oauth_states ADD COLUMN avatar_session_hash TEXT");
     }
+    if (!columns.includes("bind_session_hash")) db.exec("ALTER TABLE oauth_states ADD COLUMN bind_session_hash TEXT");
   });
 
   const accountsWithAvatars = `
@@ -101,7 +117,8 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
   `);
 
   function settings() {
-    return JSON.parse(db.prepare("SELECT settings FROM site_settings WHERE id = 1").get().settings);
+    const saved = JSON.parse(db.prepare("SELECT settings FROM site_settings WHERE id = 1").get().settings);
+    return { ...saved, visibility: { ...defaultSettings.visibility, ...saved.visibility } };
   }
 
   function getSession(token, now) {
@@ -130,12 +147,58 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
     JOIN accounts ON accounts.id = password_credentials.user_id
     WHERE identifier = ?
   `);
+  const verifiedIdentifier = db.prepare("SELECT user_id FROM verified_identifiers WHERE identifier = ?");
+  const insertVerified = db.prepare("INSERT INTO verified_identifiers VALUES (?, ?)");
+  const accountByIdentity = db.prepare("SELECT * FROM accounts WHERE provider = ? AND subject = ?");
+  const linkedOAuth = db.prepare("SELECT user_id FROM linked_oauth WHERE provider = ? AND subject = ?");
+  const linkedSubject = db.prepare("SELECT subject FROM linked_oauth WHERE user_id = ? AND provider = ?");
+  const contacts = db.prepare(`
+    SELECT identifier FROM verified_identifiers WHERE user_id = ?
+    UNION SELECT identifier FROM password_identifiers WHERE user_id = ?
+  `);
 
-  function signIn(identity, observation, now, day, previousToken) {
+  function oauthSubject(user, provider) {
+    return user.provider === provider ? user.subject : linkedSubject.get(user.id, provider)?.subject;
+  }
+
+  function bindings(user) {
+    const result = { email: null, phone: null, qq: Boolean(oauthSubject(user, "qq")), mua: Boolean(oauthSubject(user, "mua")) };
+    for (const { identifier } of contacts.all(user.id, user.id)) {
+      const at = identifier.indexOf("@");
+      if (at >= 0) result.email ??= Array.from(identifier)[0] + "•••" + identifier.slice(at);
+      else result.phone ??= "••••" + identifier.slice(-4);
+    }
+    return result;
+  }
+
+  function accountForIdentity(provider, subject) {
+    const linked = linkedOAuth.get(provider, subject);
+    return account(linked ? accountById.get(linked.user_id) : accountByIdentity.get(provider, subject));
+  }
+
+  function recordSignIn(user, avatar, observation, now, day, previousToken) {
     const observedCity = cityAvailable(observation) ? observation : null;
     const token = nonce();
     const tokenHash = digest(token);
-    transaction(() => {
+    const expected = scheduledCity(user.profile, day, cityAvailable);
+    const needsPrompt = observedCity && expected && observedCity !== expected
+      && activeOverride(user, now)?.city !== observedCity;
+    db.prepare(`
+      UPDATE accounts SET last_login_city = COALESCE(?, last_login_city),
+        last_login_session = ?, avatar = COALESCE(?, avatar) WHERE id = ?
+    `).run(observedCity, tokenHash, avatar ?? null, user.id);
+    db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
+    if (validNonce(previousToken)) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(digest(previousToken));
+    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)").run(
+      tokenHash, user.id, now + 30 * DAY_MS,
+      needsPrompt ? observedCity : null, needsPrompt ? expected : null, needsPrompt ? now + PROMPT_MS : null,
+    );
+    return token;
+  }
+
+  function signIn(identity, observation, now, day, previousToken) {
+    return transaction(() => {
+      let user = accountForIdentity(identity.provider, identity.subject);
       if (identity.provider === "password") {
         const credential = db.prepare(`
           SELECT hash FROM password_credentials JOIN accounts ON accounts.id = user_id
@@ -144,39 +207,61 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
         if (!credential || credential.hash !== identity.passwordHash) {
           throw new HttpError(401, "登录已失效，请重试。");
         }
-      } else {
+      } else if (!user) {
         insertAccount.run(randomUUID(), identity.provider, identity.subject, identity.avatar,
           JSON.stringify(initialProfile(identity.nickname)), null);
+        user = accountForIdentity(identity.provider, identity.subject);
       }
-      const user = account(db.prepare("SELECT * FROM accounts WHERE provider = ? AND subject = ?")
-        .get(identity.provider, identity.subject));
-      const expected = scheduledCity(user.profile, day, cityAvailable);
-      const needsPrompt = observedCity && expected && observedCity !== expected
-        && activeOverride(user, now)?.city !== observedCity;
-      db.prepare(`
-        UPDATE accounts SET last_login_city = COALESCE(?, last_login_city),
-          last_login_session = ?, avatar = COALESCE(?, avatar) WHERE id = ?
-      `).run(observedCity, tokenHash, identity.avatar ?? null, user.id);
-      db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
-      if (validNonce(previousToken)) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(digest(previousToken));
-      db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)").run(
-        tokenHash, user.id, now + 30 * DAY_MS,
-        needsPrompt ? observedCity : null, needsPrompt ? expected : null, needsPrompt ? now + PROMPT_MS : null,
-      );
+      const avatar = user.provider === identity.provider ? identity.avatar : null;
+      return recordSignIn(user, avatar, observation, now, day, previousToken);
     });
-    return token;
+  }
+
+  function signInVerified(identifier, observation, now, day, previousToken) {
+    return transaction(() => {
+      const existing = verifiedIdentifier.get(identifier);
+      let id = existing?.user_id ?? passwordCredential.get(identifier)?.user_id;
+      if (!id) {
+        id = randomUUID();
+        insertAccount.run(id, "verified", id, null, JSON.stringify(initialProfile()), null);
+      }
+      if (!existing) insertVerified.run(identifier, id);
+      return recordSignIn(account(accountById.get(id)), null, observation, now, day, previousToken);
+    });
   }
 
   return {
     settings,
     signIn,
+    signInVerified,
+    bindings,
+    oauthSubject,
+    bindContact(user, channel, identifier) {
+      return transaction(() => {
+        const owner = verifiedIdentifier.get(identifier) ?? passwordCredential.get(identifier);
+        if (owner?.user_id === user.id) return bindings(user);
+        const sameChannel = contacts.all(user.id, user.id)
+          .some((row) => row.identifier.includes("@") === (channel === "email"));
+        if (owner || sameChannel) throw bindingConflict();
+        insertVerified.run(identifier, user.id);
+        return bindings(user);
+      });
+    },
+    bindOAuth(user, { provider, subject }) {
+      transaction(() => {
+        const owner = accountForIdentity(provider, subject);
+        if (owner?.id === user.id) return;
+        if (owner || oauthSubject(user, provider)) throw bindingConflict();
+        db.prepare("INSERT INTO linked_oauth VALUES (?, ?, ?)").run(provider, subject, user.id);
+      });
+    },
     hasPasswordAccounts() {
       return Boolean(db.prepare("SELECT 1 FROM password_credentials LIMIT 1").get());
     },
     passwordCredential: (identifier) => passwordCredential.get(identifier),
     createPasswordAccount(identifiers, hash) {
       return transaction(() => {
-        if (identifiers.some((identifier) => passwordCredential.get(identifier))) {
+        if (identifiers.some((identifier) => passwordCredential.get(identifier) || verifiedIdentifier.get(identifier))) {
           throw new Error("该邮箱或手机号已开通。");
         }
         const id = randomUUID();
@@ -199,18 +284,18 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
     getSession,
     prompt,
     close: () => db.close(),
-    rememberOAuth(state, browser, provider, verifier, now, avatarSessionHash = null) {
+    rememberOAuth(state, browser, provider, verifier, now, { avatarSession, bindSession } = {}) {
       db.prepare("DELETE FROM oauth_states WHERE expires_at <= ?").run(now);
       db.prepare(`
-        INSERT INTO oauth_states (state_hash, browser_hash, provider, expires_at, verifier, avatar_session_hash)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(digest(state), digest(browser), provider, now + PROMPT_MS, verifier, avatarSessionHash);
+        INSERT INTO oauth_states (state_hash, browser_hash, provider, expires_at, verifier, avatar_session_hash, bind_session_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(digest(state), digest(browser), provider, now + PROMPT_MS, verifier ?? null, avatarSession ?? null, bindSession ?? null);
     },
     takeOAuth(state, browser, provider, now) {
       if (!validNonce(state) || !validNonce(browser)) return null;
       return db.prepare(`
         DELETE FROM oauth_states WHERE state_hash = ? AND browser_hash = ?
-          AND provider = ? AND expires_at > ? RETURNING verifier, avatar_session_hash
+          AND provider = ? AND expires_at > ? RETURNING verifier, avatar_session_hash, bind_session_hash
       `).get(digest(state), digest(browser), provider, now);
     },
     signOut(token) {

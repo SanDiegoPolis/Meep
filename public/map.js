@@ -1,10 +1,11 @@
 import { $, api, avatar, cityLabel, el, heading, icon, iconButton, statusPill } from "./ui.js";
 import { mountMapView } from "./map-view.js";
+import { mountLogin } from "./login.js";
 
 const collator = new Intl.Collator("zh-CN");
 const nickname = (member) => member.nickname || "社区成员";
 
-export function mountMap(main, session, onDemoLogin, onSessionExpired, onPasswordLogin) {
+export function mountMap(main, session, onDemoLogin, onSessionExpired, onLogin) {
   main.replaceChildren(heading("世界地图", "看看同好们此刻在哪座城市。"));
 
   const layout = el("div", "map-layout");
@@ -79,28 +80,8 @@ export function mountMap(main, session, onDemoLogin, onSessionExpired, onPasswor
         actions.append(control);
       }
     } else {
-      if (session.passwordLoginOrigin === location.origin) {
-        actions.before(passwordForm(onPasswordLogin));
-      } else if (session.passwordLoginOrigin) {
-        const link = el("a", "button primary", "前往邮箱或手机号登录");
-        link.href = session.passwordLoginOrigin + "/";
-        actions.before(link, el("p", "", "请使用站点的 HTTPS 地址安全登录。"));
-      } else {
-        const control = el("button", "button primary", "邮箱或手机号登录");
-        control.type = "button";
-        control.disabled = true;
-        actions.before(control, el("p", "", "请联系站点管理员开通成员账号。"));
-      }
-      for (const [provider, label] of [["qq", "QQ 登录"], ["mua", "MUA 登录"]]) {
-        const enabled = session.providers[provider];
-        const control = el(enabled ? "a" : "button", "button " + (provider === "qq" ? "primary" : "secondary"), label);
-        if (enabled) control.href = "/auth/" + provider + "/start";
-        else control.disabled = true;
-        actions.append(control);
-      }
-      if (!session.providers.qq || !session.providers.mua) {
-        $(".login-card", login).append(el("p", "hint", "灰色的第三方登录入口尚未配置。"));
-      }
+      actions.classList.add("login-methods");
+      mountLogin(actions, session, onLogin);
     }
     count.textContent = "登录后显示成员";
   }
@@ -201,36 +182,6 @@ export function mountMap(main, session, onDemoLogin, onSessionExpired, onPasswor
     controls.abort();
     popover.close();
   }
-}
-
-function passwordForm(onLogin) {
-  const form = el("form", "login-form");
-  form.method = "post";
-  form.action = "/api/login/password";
-  form.innerHTML = `
-    <label>邮箱或手机号<input name="identifier" autocomplete="username" maxlength="254"
-      autocapitalize="none" spellcheck="false" required></label>
-    <label>密码<input name="password" type="password" autocomplete="current-password"
-      maxlength="256" required></label>
-    <div class="login-form-error" role="alert"></div>
-    <button class="button primary" type="submit">登录</button>`;
-  const submit = $("button", form);
-  const error = $(".login-form-error", form);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (submit.disabled) return;
-    submit.disabled = true;
-    error.textContent = "";
-    try {
-      const credentials = Object.fromEntries(new FormData(form));
-      await onLogin(credentials);
-    } catch (failure) {
-      error.textContent = failure.message;
-    } finally {
-      submit.disabled = false;
-    }
-  });
-  return form;
 }
 
 function cluster(members, point, width, height) {
