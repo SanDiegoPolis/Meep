@@ -84,7 +84,12 @@ export function mountMap(main, session, onDemoLogin, onSessionExpired, onPasswor
       } else if (session.passwordLoginOrigin) {
         const link = el("a", "button primary", "前往邮箱或手机号登录");
         link.href = session.passwordLoginOrigin + "/";
-        actions.append(link);
+        actions.before(link, el("p", "", "请使用站点的 HTTPS 地址安全登录。"));
+      } else {
+        const control = el("button", "button primary", "邮箱或手机号登录");
+        control.type = "button";
+        control.disabled = true;
+        actions.before(control, el("p", "", "请联系站点管理员开通成员账号。"));
       }
       for (const [provider, label] of [["qq", "QQ 登录"], ["mua", "MUA 登录"]]) {
         const enabled = session.providers[provider];
@@ -94,7 +99,7 @@ export function mountMap(main, session, onDemoLogin, onSessionExpired, onPasswor
         actions.append(control);
       }
       if (!session.providers.qq || !session.providers.mua) {
-        $(".login-card", login).append(el("p", "hint", "灰色入口等待站点管理员配置。"));
+        $(".login-card", login).append(el("p", "hint", "灰色的第三方登录入口尚未配置。"));
       }
     }
     count.textContent = "登录后显示成员";
