@@ -41,6 +41,18 @@ Linux 服务器可以通过 GitHub Actions 自动测试并发布。首次配置�
 
 首次登录后，从个人资料页底部复制账号标识，填入 `ADMIN_ACCOUNTS` 并重启。多个账号标识用英文逗号分隔。
 
+### 邮箱和手机号登录
+
+在站点所用的数据库中开通成员账号后，登录页会显示邮箱或手机号登录表单。使用同一条命令填写两项时，两个标识对应同一个成员账号。手机号支持中国大陆 11 位号码和带国家区号的国际格式。
+
+```sh
+node --env-file=.env server/member.js add --email member@example.com --phone +8613800138000
+```
+
+命令会生成随机密码。管理员核实联系方式后，将密码私下交给成员。需要重置时，用 `reset --email member@example.com` 或 `reset --phone +8613800138000`，成员的现有会话随即失效。
+
+使用 systemd 部署时，以服务运行账号执行命令，将 `--env-file` 指向服务用的 `shared/.env`，从当前发布目录运行 `server/member.js`。公网登录使用 `APP_ORIGIN` 指定的 HTTPS 地址。反向代理需按连接实际协议覆盖 `X-Forwarded-Proto`，应用端口仅供反向代理访问。
+
 ## 可选配置
 
 ### MUA 登录

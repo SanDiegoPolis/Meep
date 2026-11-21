@@ -4,7 +4,7 @@ import { mountMapView } from "./map-view.js";
 const collator = new Intl.Collator("zh-CN");
 const nickname = (member) => member.nickname || "社区成员";
 
-export function mountMap(main, session, onDemoLogin, onSessionExpired) {
+export function mountMap(main, session, onDemoLogin, onSessionExpired, onPasswordLogin) {
   main.replaceChildren(heading("世界地图", "看看同好们此刻在哪座城市。"));
 
   const layout = el("div", "map-layout");
@@ -64,7 +64,7 @@ export function mountMap(main, session, onDemoLogin, onSessionExpired) {
     login.innerHTML = `
       <section class="login-card" id="login">
         <h2>登录查看地图成员</h2>
-        <p>${session.demo ? "使用本机演示账号体验成员地图。" : "使用 QQ 或 Minecraft 高校联盟账号继续。"}</p>
+        ${session.demo ? "<p>使用本机演示账号体验成员地图。</p>" : ""}
         <div class="login-actions"></div>
       </section>`;
     stage.append(login);
@@ -79,6 +79,13 @@ export function mountMap(main, session, onDemoLogin, onSessionExpired) {
         actions.append(control);
       }
     } else {
+      if (session.passwordLoginOrigin === location.origin) {
+        actions.before(passwordForm(onPasswordLogin));
+      } else if (session.passwordLoginOrigin) {
+        const link = el("a", "button primary", "前往邮箱或手机号登录");
+        link.href = session.passwordLoginOrigin + "/";
+        actions.append(link);
+      }
       for (const [provider, label] of [["qq", "QQ 登录"], ["mua", "MUA 登录"]]) {
         const enabled = session.providers[provider];
         const control = el(enabled ? "a" : "button", "button " + (provider === "qq" ? "primary" : "secondary"), label);
@@ -189,6 +196,36 @@ export function mountMap(main, session, onDemoLogin, onSessionExpired) {
     controls.abort();
     popover.close();
   }
+}
+
+function passwordForm(onLogin) {
+  const form = el("form", "login-form");
+  form.method = "post";
+  form.action = "/api/login/password";
+  form.innerHTML = `
+    <label>邮箱或手机号<input name="identifier" autocomplete="username" maxlength="254"
+      autocapitalize="none" spellcheck="false" required></label>
+    <label>密码<input name="password" type="password" autocomplete="current-password"
+      maxlength="256" required></label>
+    <div class="login-form-error" role="alert"></div>
+    <button class="button primary" type="submit">登录</button>`;
+  const submit = $("button", form);
+  const error = $(".login-form-error", form);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (submit.disabled) return;
+    submit.disabled = true;
+    error.textContent = "";
+    try {
+      const credentials = Object.fromEntries(new FormData(form));
+      await onLogin(credentials);
+    } catch (failure) {
+      error.textContent = failure.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  return form;
 }
 
 function cluster(members, point, width, height) {

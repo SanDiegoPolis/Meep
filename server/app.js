@@ -5,6 +5,7 @@ import { activeOverride, calendar, mapCity } from "./location.js";
 import { fields, HttpError, personalVisibility, publicFields, validateProfile, validateSettings } from "./profile.js";
 import { nonce, validNonce } from "./store.js";
 import { demoLogins } from "./demo.js";
+import { passwordLogin } from "./password.js";
 
 const staticFiles = {
   "/": ["index.html", "text/html; charset=utf-8"],
@@ -21,6 +22,7 @@ const staticFiles = {
 export function createApp({ store, cities, providers, geo, origin, timeZone, admins, demo = false, clock = Date.now }) {
   const today = calendar(timeZone);
   const secure = origin.startsWith("https:");
+  const checkPassword = passwordLogin(store);
   const sessionCookie = secure ? "__Host-mianji_session" : "mianji_session";
   const oauthCookie = secure ? "__Host-mianji_oauth" : "mianji_oauth";
   const assets = new Map(Object.entries(staticFiles).map(([path, [file, type]]) => [
@@ -64,6 +66,18 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
         }, demoLogins[account].city, now, day, token));
         return json(res, { ok: true });
       }
+      if (method === "POST" && path === "/api/login/password") {
+        if (demo || !store.hasPasswordAccounts()) throw new HttpError(404, "还未开通邮箱或手机号登录。");
+        if (secure && req.headers["x-forwarded-proto"] !== "https") {
+          throw new HttpError(403, "请通过 HTTPS 登录。");
+        }
+        const credentials = await body(req, 4096);
+        const identity = await checkPassword(credentials, clock());
+        const city = await geo.city(req);
+        const signedAt = clock();
+        setSession(res, store.signIn(identity, city, signedAt, today(signedAt), token));
+        return json(res, { ok: true });
+      }
 
       const context = store.getSession(token, now);
       const account = context?.account;
@@ -76,6 +90,7 @@ export function createApp({ store, cities, providers, geo, origin, timeZone, adm
         const pending = context && store.prompt(context, day, now);
         return json(res, {
           demo, providers: { qq: Boolean(providers.qq), mua: Boolean(providers.mua) },
+          passwordLoginOrigin: !demo && store.hasPasswordAccounts() ? origin : null,
           fields, day, timeZone, mapCountry,
           viewer: account ? {
             id: account.id, nickname: account.profile.nickname, avatar: account.display_avatar,

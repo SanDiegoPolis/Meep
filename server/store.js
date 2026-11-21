@@ -36,6 +36,14 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
       qq_url TEXT,
       CHECK ((image IS NULL) <> (qq_url IS NULL))
     );
+    CREATE TABLE IF NOT EXISTS password_credentials (
+      user_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+      hash TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS password_identifiers (
+      identifier TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT NOT NULL REFERENCES password_credentials(user_id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -115,14 +123,31 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
     INSERT INTO accounts (id, provider, subject, avatar, profile, last_login_city)
     VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider, subject) DO NOTHING
   `);
+  const passwordCredential = db.prepare(`
+    SELECT accounts.subject, password_credentials.user_id, password_credentials.hash
+    FROM password_identifiers
+    JOIN password_credentials USING (user_id)
+    JOIN accounts ON accounts.id = password_credentials.user_id
+    WHERE identifier = ?
+  `);
 
   function signIn(identity, observation, now, day, previousToken) {
     const observedCity = cityAvailable(observation) ? observation : null;
     const token = nonce();
     const tokenHash = digest(token);
     transaction(() => {
-      insertAccount.run(randomUUID(), identity.provider, identity.subject, identity.avatar,
-        JSON.stringify(initialProfile(identity.nickname)), null);
+      if (identity.provider === "password") {
+        const credential = db.prepare(`
+          SELECT hash FROM password_credentials JOIN accounts ON accounts.id = user_id
+          WHERE provider = 'password' AND subject = ?
+        `).get(identity.subject);
+        if (!credential || credential.hash !== identity.passwordHash) {
+          throw new HttpError(401, "登录已失效，请重试。");
+        }
+      } else {
+        insertAccount.run(randomUUID(), identity.provider, identity.subject, identity.avatar,
+          JSON.stringify(initialProfile(identity.nickname)), null);
+      }
       const user = account(db.prepare("SELECT * FROM accounts WHERE provider = ? AND subject = ?")
         .get(identity.provider, identity.subject));
       const expected = scheduledCity(user.profile, day, cityAvailable);
@@ -131,7 +156,7 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
       db.prepare(`
         UPDATE accounts SET last_login_city = COALESCE(?, last_login_city),
           last_login_session = ?, avatar = COALESCE(?, avatar) WHERE id = ?
-      `).run(observedCity, tokenHash, identity.avatar, user.id);
+      `).run(observedCity, tokenHash, identity.avatar ?? null, user.id);
       db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
       if (validNonce(previousToken)) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(digest(previousToken));
       db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)").run(
@@ -145,6 +170,32 @@ export function openStore(file, cityAvailable = Number.isSafeInteger) {
   return {
     settings,
     signIn,
+    hasPasswordAccounts() {
+      return Boolean(db.prepare("SELECT 1 FROM password_credentials LIMIT 1").get());
+    },
+    passwordCredential: (identifier) => passwordCredential.get(identifier),
+    createPasswordAccount(identifiers, hash) {
+      return transaction(() => {
+        if (identifiers.some((identifier) => passwordCredential.get(identifier))) {
+          throw new Error("该邮箱或手机号已开通。");
+        }
+        const id = randomUUID();
+        insertAccount.run(id, "password", id, null, JSON.stringify(initialProfile()), null);
+        db.prepare("INSERT INTO password_credentials VALUES (?, ?)").run(id, hash);
+        const insertIdentifier = db.prepare("INSERT INTO password_identifiers VALUES (?, ?)");
+        for (const identifier of identifiers) insertIdentifier.run(identifier, id);
+        return id;
+      });
+    },
+    resetPassword(identifier, hash) {
+      return transaction(() => {
+        const credential = passwordCredential.get(identifier);
+        if (!credential) throw new Error("该邮箱或手机号尚未开通。");
+        db.prepare("UPDATE password_credentials SET hash = ? WHERE user_id = ?").run(hash, credential.user_id);
+        db.prepare("DELETE FROM sessions WHERE user_id = ?").run(credential.user_id);
+        return credential.subject;
+      });
+    },
     getSession,
     prompt,
     close: () => db.close(),

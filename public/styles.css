@@ -103,6 +103,13 @@ h1 { font-size: clamp(32px, 4.4vw, 52px); letter-spacing: -.045em; line-height: 
 .login-card p { font-size: 13px; color: var(--muted); margin: 4px 0 12px; }
 .login-card h2 { font-size: 20px; }
 .login-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.map-stage:has(.login-form) { min-height: 330px; }
+.login-card:has(.login-form) { width: min(100%, 360px); }
+.login-form { display: grid; gap: 8px; margin: 12px 0; text-align: left; }
+.login-form label { display: grid; gap: 4px; font-size: 13px; }
+.login-form input { width: 100%; padding: 7px 9px; border: 1px solid #cbd8cd; border-radius: 8px; background: #fff; }
+.login-form-error { color: #9b3430; font-size: 13px; }
+.login-form-error:empty { display: none; }
 .login-card .hint { margin: 9px 0 0; }
 .map-empty { background: #122a31e8; color: #e3ece7; padding: 9px 14px; border: 1px solid #668984; border-radius: 10px; font-size: 13px; }
 .panel { padding: 19px; }

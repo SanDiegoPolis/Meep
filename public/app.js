@@ -39,7 +39,11 @@ async function renderPage() {
   window.scrollTo(0, 0);
   document.title = "面基地图 · " + ({ map: "世界地图", profile: "个人资料", admin: "管理面板" })[view];
   if (view === "map") {
-    map = mountMap(main, session, loginDemo, resetSession);
+    map = mountMap(main, session, loginDemo, resetSession, async (credentials) => {
+      await api("/api/login/password", "POST", credentials);
+      await resetSession();
+      showLocationPrompt();
+    });
     return;
   }
   main.replaceChildren(el("p", "loading", "正在加载…"));
@@ -95,7 +99,7 @@ function renderHeader(view) {
     const login = button("成员登录", "button secondary small");
     login.addEventListener("click", () => {
       $("#login")?.scrollIntoView({ block: "center" });
-      $("#login .button:not(:disabled)")?.focus({ preventScroll: true });
+      ($("#login .login-form input") ?? $("#login .button:not(:disabled)"))?.focus({ preventScroll: true });
     });
     account.append(login);
   }
