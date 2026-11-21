@@ -1,6 +1,6 @@
 {
   "name": "mianji-map",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,6 +9,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server/main.js",
     "demo": "node server/main.js --demo",
+    "auth:preview": "node server/main.js --auth-preview",
+    "auth:live-test": "node --env-file=.env.auth-test server/main.js --auth-live-test",
     "test": "node --test --test-isolation=none"
   }
 }

@@ -5,6 +5,36 @@ export const demoLogins = {
   admin: { city: 1808926 },
 };
 
+export function previewProviders(origin) {
+  return Object.fromEntries(["qq", "mua"].map(provider => [provider, {
+    start: (_, state) => ({ url: origin + "/auth/preview/" + provider + "?state=" + state }),
+    complete: (_, code) => {
+      if (code !== "a" && code !== "b") throw new Error("Invalid preview identity");
+      return {
+        provider, subject: "preview:" + code, nickname: (provider === "qq" ? "QQ" : "MUA") + " 测试账号 " + code.toUpperCase(),
+        avatar: null,
+      };
+    },
+  }]));
+}
+
+export function previewAuthorization(res, provider, state) {
+  const label = provider === "qq" ? "QQ" : "MUA";
+  const callback = "/auth/" + provider + "/callback?state=" + state;
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(`<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${label} 模拟授权</title><link rel="stylesheet" href="/styles.css">
+<main class="wrap"><h1 class="hero">${label} 模拟授权</h1><section class="panel">
+  <p class="hint">选择一个本地测试账号继续。</p>
+  <div class="form-actions">
+    <a class="button primary" href="${callback}&amp;code=a">使用测试账号 A</a>
+    <a class="button secondary" href="${callback}&amp;code=b">使用测试账号 B</a>
+    <a class="button quiet" href="${callback}&amp;error=access_denied">取消授权</a>
+  </div>
+</section></main></html>`);
+}
+
 export function seedDemo(store) {
   const members = [
     ["admin", "小满", 1796236, "available", "上海交通大学", "社团负责人", "一起造城，也一起约饭。"],

@@ -39,8 +39,8 @@ async function renderPage() {
   window.scrollTo(0, 0);
   document.title = "面基地图 · " + ({ map: "世界地图", profile: "个人资料", admin: "管理面板" })[view];
   if (view === "map") {
-    map = mountMap(main, session, loginDemo, resetSession, async (credentials) => {
-      await api("/api/login/password", "POST", credentials);
+    map = mountMap(main, session, loginDemo, resetSession, async (path, credentials) => {
+      await api(path, "POST", credentials);
       await resetSession();
       showLocationPrompt();
     });
@@ -99,7 +99,8 @@ function renderHeader(view) {
     const login = button("成员登录", "button secondary small");
     login.addEventListener("click", () => {
       $("#login")?.scrollIntoView({ block: "center" });
-      ($("#login .login-form input") ?? $("#login .button:not(:disabled)"))?.focus({ preventScroll: true });
+      ($("#login .login-panel:not([hidden]) .login-form:not([hidden]) input")
+        ?? $("#login .button:not(:disabled)"))?.focus({ preventScroll: true });
     });
     account.append(login);
   }
@@ -133,9 +134,16 @@ function readSession() {
 function showAuthResult() {
   const query = new URLSearchParams(location.search);
   const sync = query.get("qqAvatar");
-  const code = sync || query.get("login");
+  const binding = query.get("binding");
+  const code = binding || sync || query.get("login");
   if (!code) return;
-  const messages = sync ? {
+  const messages = binding ? {
+    ok: "账号已绑定",
+    expired: "本次绑定已失效，请重新发起。",
+    denied: "授权未完成，可以重新发起绑定。",
+    conflict: "该登录方式已绑定到账号，无法重复绑定。",
+    failed: "绑定失败，请稍后再试。",
+  } : sync ? {
     ok: "QQ 头像已同步",
     expired: "同步授权已过期，请重新发起。",
     denied: "QQ 授权未完成，头像未更新。",

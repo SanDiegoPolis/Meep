@@ -3,7 +3,7 @@ const examples = require("../../members.js");
 const statuses = { available: "随时可约", busy: "请勿打扰" };
 const fields = [
   ["school", "学校"], ["bio", "个人简介"], ["qq", "QQ 号"], ["wechat", "微信号"],
-  ["clubRole", "在社团的职务"], ["pastRole", "历史职务"], ["mcRole", "在高校 MC 社区的职务"],
+  ["clubName", "社团名称"], ["clubRole", "社团职务"], ["pastRole", "社团历史职务"], ["mcRole", "在社区的职务"],
 ];
 
 const members = examples.filter((member) => member.status !== "hidden").map((member) => ({

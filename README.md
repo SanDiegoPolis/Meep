@@ -43,7 +43,20 @@ Linux 服务器可以通过 GitHub Actions 自动测试并发布。首次配置�
 
 ### 邮箱和手机号登录
 
-在站点所用的数据库中开通成员账号后，登录页会显示邮箱或手机号登录表单。使用同一条命令填写两项时，两个标识对应同一个成员账号。手机号支持中国大陆 11 位号码和带国家区号的国际格式。
+邮箱登录和手机号登录各有独立入口，与 QQ、MUA 并列。成员首次通过验证码验证时自动注册，后续验证会登录同一账号。手机号支持中国大陆 11 位号码和带国家区号的国际格式。
+
+运行 `npm run auth:preview`，打开 [本机登录预览](http://127.0.0.1:4180/)。验证码在页面上显示，QQ 和 MUA 使用本地模拟授权。账号保存在独立的内存数据库中，预览服务重启后清空。可用 `AUTH_PREVIEW_PORT` 更改预览端口。
+
+登录后，可在「个人资料 → 账号绑定」验证其他登录方式。绑定成功后，退出再用绑定的方式进入，会保留原账号资料。每种方式可绑定一个凭据。凭据已用于另一个账号时会提示冲突。
+
+本机验收真实投递时，将需要测试的发送配置放进 `.env.auth-test`，运行 `npm run auth:live-test`，打开 [本机投递实测](http://127.0.0.1:4180/)。若该端口正在运行旧登录预览，先停止旧预览。两个渠道可单独启用，页面提示验证码发送结果，从真实收件箱或短信读取验证码后提交。此模式仅监听本机，使用独立的内存数据库。用 `onboarding@resend.dev` 发件时，收件人需填写自己的 Resend 注册邮箱。 [Resend 测试发件说明](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain)
+
+公网发码按渠道在 `.env` 中配置，配置后重启服务。
+
+- 邮箱使用 `RESEND_API_KEY` 和 `EMAIL_FROM`，发件地址使用已在 Resend 验证的域名。 [Resend 发信文档](https://resend.com/docs/api-reference/emails/send-email)
+- 短信使用 `TENCENT_SMS_SECRET_ID`、`TENCENT_SMS_SECRET_KEY`、`TENCENT_SMS_APP_ID`、`TENCENT_SMS_SIGN_NAME` 和 `TENCENT_SMS_TEMPLATE_ID`。填入通过审核的签名内容及只含一个验证码变量的模板。发送国际或港澳台短信需要对应地区的模板。 [腾讯云短信文档](https://cloud.tencent.com/document/product/382/55981)
+
+管理员仍可手动开通密码账号。同一次开通绑定邮箱和手机号时，两项都能登录同一个账号。
 
 ```sh
 node --env-file=.env server/member.js add --email member@example.com --phone +8613800138000
